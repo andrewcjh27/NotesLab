@@ -22,7 +22,8 @@ struct ContentView: View {
                             Text(note.title)
                                 .font(.headline)
 
-                            Text(note.content)
+                            // CHANGED: Safely getting preview text from the first block
+                            Text(note.blocks.first?.content ?? "No content")
                                 .lineLimit(2)
                                 .foregroundStyle(.secondary)
                         }

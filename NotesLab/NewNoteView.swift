@@ -12,26 +12,28 @@ struct NewNoteView: View {
     @ObservedObject var store: NotesStore
 
     @State private var title = ""
-    @State private var content = ""
 
     var body: some View {
-        VStack(spacing: 16) {
-            TextField("Title", text: $title)
-                .font(.title2)
+        VStack(spacing: 20) {
+            Text("Create New Note")
+                .font(.headline)
+                .padding(.top)
 
-            TextEditor(text: $content)
-                .frame(minHeight: 200)
+            TextField("Enter Note Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .font(.title3)
 
             Spacer()
 
-            Button("Save") {
-                store.addNote(title: title, content: content)
+            Button("Create Note") {
+                // CHANGED: Calling the simplified addNote function
+                store.addNote(title: title)
                 dismiss()
             }
             .buttonStyle(.borderedProminent)
             .disabled(title.isEmpty)
         }
         .padding()
-        .frame(minWidth: 400, minHeight: 300)
+        .frame(minWidth: 300, minHeight: 200)
     }
 }

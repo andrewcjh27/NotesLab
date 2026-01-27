@@ -9,6 +9,8 @@ import SwiftUI
 
 @main
 struct NotesLabApp: App {
+    @StateObject private var store = NotesStore()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
