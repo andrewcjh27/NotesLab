@@ -6,17 +6,14 @@
 //
 
 import SwiftUI
-import PhotosUI // Required for picking images
+import PhotosUI
+import Foundation
 
 struct NoteEditorView: View {
-    // We use @State so we can edit the note locally before saving
     @State private var note: Note
     @ObservedObject var store: NotesStore
-    
-    // For Image Picking
     @State private var selectedItem: PhotosPickerItem? = nil
     
-    // We need to initialize the state with the passed-in note
     init(note: Note, store: NotesStore) {
         self._note = State(initialValue: note)
         self.store = store
@@ -25,80 +22,77 @@ struct NoteEditorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                // 1. Main Title
+                // Title Area
                 TextField("Note Title", text: $note.title)
                     .font(.largeTitle.bold())
                     .padding(.bottom)
                 
-                // 2. The Loop: Rendering every block
-                // $note.blocks.indices allows us to bind to the array directly
+                // Render all blocks
                 ForEach($note.blocks.indices, id: \.self) { index in
                     HStack(alignment: .top) {
-                        // The actual content block
                         renderBlock(binding: $note.blocks[index])
                         
-                        // Small delete button for each block
+                        // Delete Block Button
                         Button {
                             deleteBlock(at: index)
                         } label: {
                             Image(systemName: "trash")
                                 .font(.caption)
-                                .foregroundColor(.red.opacity(0.5))
+                                .foregroundColor(.red.opacity(0.3))
                         }
                         .padding(.top, 8)
                     }
                 }
                 
-                // 3. Add Block Menu (The "Plus" Button)
+                // Add Block Menu
                 Menu {
                     ButtonLabel(title: "Text", icon: "text.alignleft", action: { addBlock(.text) })
                     ButtonLabel(title: "Heading", icon: "pencil", action: { addBlock(.heading) })
                     ButtonLabel(title: "Code", icon: "chevron.left.forwardslash.chevron.right", action: { addBlock(.code) })
                     ButtonLabel(title: "Math", icon: "x.squareroot", action: { addBlock(.calculation) })
-                    // We handle image differently (it triggers photo picker)
                 } label: {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Add Block")
-                    }
-                    .foregroundColor(.blue) // DESIGN: Action color
-                    .padding()
+                    Label("Add Block", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(10)
                 }
                 
-                // Separate Photo Picker
-                PhotosPicker(selection: $selectedItem, matching: .images, photoLibrary: .shared()) {
-                    HStack {
-                        Image(systemName: "photo")
-                        Text("Add Image")
-                    }
-                    .foregroundColor(.blue)
-                    .padding(.horizontal)
+                // Image Picker Button
+                PhotosPicker(selection: $selectedItem, matching: .images) {
+                    Label("Add Image", systemImage: "photo")
+                        .font(.headline)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(10)
                 }
                 .onChange(of: selectedItem) { newItem in
                     Task {
-                        // Logic to load the image data
                         if let data = try? await newItem?.loadTransferable(type: Data.self) {
                             var newBlock = NoteBlock.empty(type: .image)
                             newBlock.imageData = data
                             note.blocks.append(newBlock)
-                            selectedItem = nil // Reset picker
+                            selectedItem = nil
                         }
                     }
                 }
                 
-                Spacer(minLength: 50)
+                Spacer(minLength: 100)
             }
             .padding()
         }
+        // 1. Keep the old save (just in case the user exits quickly)
         .onDisappear {
-            // Auto-save when leaving the screen
+            store.updateNote(note)
+        }
+        // 2. AUTO-SAVE: This triggers every time 'note' changes
+        .onChange(of: note) { _ in
             store.updateNote(note)
         }
     }
     
-    // --- Helper Functions ---
-    
-    // Decides which view to show based on block type
     @ViewBuilder
     func renderBlock(binding: Binding<NoteBlock>) -> some View {
         switch binding.wrappedValue.type {
@@ -128,15 +122,11 @@ struct NoteEditorView: View {
     }
 }
 
-// Simple helper for menu buttons
 struct ButtonLabel: View {
     let title: String
     let icon: String
     let action: () -> Void
-    
     var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-        }
+        Button(action: action) { Label(title, systemImage: icon) }
     }
 }
