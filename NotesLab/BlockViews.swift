@@ -6,22 +6,18 @@
 //
 
 import SwiftUI
-import UIKit // REQUIRED: This fixes the "Cannot find UIImage" error
+import UIKit
 
-// --- 1. Text Block View ---
+// --- 1. Text Block View (UPDATED FOR RICH TEXT) ---
 struct TextBlockView: View {
     @Binding var text: String
     
     var body: some View {
-        if #available(iOS 16.0, *) {
-            TextField("Write something...", text: $text, axis: .vertical)
-                .font(.body)
-                .padding(.vertical, 4)
-        } else {
-            TextField("Write something...", text: $text)
-                .font(.body)
-                .padding(.vertical, 4)
-        }
+        // We use our new RichTextEditor here instead of a plain TextField.
+        // It handles its own formatting internally via the keyboard toolbar.
+        RichTextEditor(text: $text)
+            .frame(minHeight: 40) // Allows it to grow
+            .padding(.vertical, 4)
     }
 }
 
@@ -59,13 +55,15 @@ struct CodeBlockView: View {
                 TextEditor(text: $code)
                     .font(.system(.body, design: .monospaced))
                     .scrollContentBackground(.hidden)
-                    .background(Color.black.opacity(0.05))
+                    .background(Color(red: 0.1, green: 0.1, blue: 0.1))
+                    .foregroundColor(.white)
                     .cornerRadius(8)
                     .frame(minHeight: 60)
             } else {
                 TextEditor(text: $code)
                     .font(.system(.body, design: .monospaced))
-                    .background(Color.black.opacity(0.05))
+                    .background(Color(red: 0.1, green: 0.1, blue: 0.1))
+                    .foregroundColor(.white)
                     .cornerRadius(8)
                     .frame(minHeight: 60)
             }
@@ -74,7 +72,7 @@ struct CodeBlockView: View {
     }
 }
 
-// --- 4. Calculation Block View (FIXED) ---
+// --- 4. Calculation Block View ---
 struct CalculationBlockView: View {
     @Binding var equation: String
     
@@ -89,30 +87,26 @@ struct CalculationBlockView: View {
         let cleanEq = equation.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleanEq.isEmpty { return "..." }
 
-        // 1. Only allow valid math characters
         let allowedCharacters = CharacterSet(charactersIn: "0123456789.+-*/() ")
         if cleanEq.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
             return "?"
         }
         
-        // 2. CRASH PREVENTER: Don't calculate if the equation ends with an operator.
         let unsafeEndings = ["+", "-", "*", "/", "("]
         if unsafeEndings.contains(where: { cleanEq.hasSuffix($0) }) {
             return "..."
         }
         
-        // 3. PARENTHESIS CHECK (New!): Fixes "Unable to parse" crashes
         var openCount = 0
         for char in cleanEq {
             if char == "(" { openCount += 1 }
             else if char == ")" {
                 openCount -= 1
-                if openCount < 0 { return "?" } // Closing bracket appeared before opening one
+                if openCount < 0 { return "?" }
             }
         }
-        if openCount != 0 { return "..." } // Parentheses are not closed yet
+        if openCount != 0 { return "..." }
 
-        // 4. Evaluate safely
         let expression = NSExpression(format: cleanEq)
         if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
             return numberFormatter.string(from: value) ?? "..."
@@ -127,12 +121,13 @@ struct CalculationBlockView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 150)
                 .keyboardType(.numbersAndPunctuation)
+                .font(.system(.body, design: .monospaced))
             
             Text("=")
                 .foregroundColor(.secondary)
             
             Text(result)
-                .font(.headline)
+                .font(.headline.monospaced())
                 .foregroundColor(.blue)
             
             Spacer()
@@ -169,11 +164,11 @@ struct ImageBlockView: View {
 struct BlockViews_Previews: PreviewProvider {
     static var previews: some View {
         VStack(spacing: 20) {
-            TextBlockView(text: .constant("This is a standard text block."))
+            // Note: We use HTML strings for preview now
+            TextBlockView(text: .constant("<b>Bold</b> and <i>Italic</i> text"))
             HeadingBlockView(text: .constant("Experiment 1"))
             CalculationBlockView(equation: .constant("12 * 5"))
             CodeBlockView(code: .constant("print('Hello World')"))
-            ImageBlockView(imageData: nil)
         }
         .padding()
         .previewLayout(.sizeThatFits)
