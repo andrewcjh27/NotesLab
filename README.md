@@ -1,4 +1,4 @@
-BioNotes (iOS)
+Canvas (iOS)
 
 A native iOS note-taking application built with SwiftUI and MVVM architecture. This project demonstrates core mobile development concepts including data persistence, state management, and declarative UI design.
 
