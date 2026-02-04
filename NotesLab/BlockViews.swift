@@ -2,175 +2,213 @@
 //  BlockViews.swift
 //  NotesLab
 //
-//  Created by Andrew Choi on 1/27/26.
-//
 
 import SwiftUI
 import UIKit
 
-// --- 1. Text Block View (UPDATED FOR RICH TEXT) ---
-struct TextBlockView: View {
-    @Binding var text: String
-    
+// MARK: - Shared Footer (time + tags)
+
+struct BlockFooterView: View {
+    @Binding var hashtags: [String]
+    let createdAt: Date
+
+    @State private var newTag = ""
+    @State private var showTagInput = false
+
     var body: some View {
-        // We use our new RichTextEditor here instead of a plain TextField.
-        // It handles its own formatting internally via the keyboard toolbar.
-        RichTextEditor(text: $text)
-            .frame(minHeight: 40) // Allows it to grow
-            .padding(.vertical, 4)
+        HStack(alignment: .center) {
+            Text(createdAt.formatted(date: .omitted, time: .shortened))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(hashtags, id: \.self) { tag in
+                        Text("#\(tag)")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(4)
+                            .onTapGesture {
+                                if let idx = hashtags.firstIndex(of: tag) {
+                                    hashtags.remove(at: idx)
+                                }
+                            }
+                    }
+
+                    Button {
+                        showTagInput.toggle()
+                    } label: {
+                        Image(systemName: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+        .popover(isPresented: $showTagInput) {
+            HStack {
+                TextField("New tag", text: $newTag)
+                    .onSubmit(addTag)
+
+                Button("Add", action: addTag)
+            }
+            .padding()
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private func addTag() {
+        let tag = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tag.isEmpty else { return }
+        hashtags.append(tag)
+        newTag = ""
+        showTagInput = false
     }
 }
 
-// --- 2. Heading Block View ---
+// MARK: - Heading Block (editable)
+
 struct HeadingBlockView: View {
     @Binding var text: String
-    
+    @Binding var hashtags: [String]
+    var createdAt: Date
+
     var body: some View {
-        if #available(iOS 16.0, *) {
-            TextField("Heading", text: $text, axis: .vertical)
-                .font(.title2.bold())
-                .foregroundColor(.primary)
-                .padding(.top, 16)
-        } else {
+        VStack(alignment: .leading, spacing: 0) {
             TextField("Heading", text: $text)
                 .font(.title2.bold())
                 .foregroundColor(.primary)
-                .padding(.top, 16)
+                .padding(.vertical, 4)
+
+            BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }
     }
 }
 
-// --- 3. Code Block View ---
+// MARK: - Code Block
+
 struct CodeBlockView: View {
     @Binding var code: String
-    
+    @Binding var hashtags: [String]
+    var createdAt: Date
+
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("CODE")
-                .font(.caption)
+                .font(.caption.bold())
                 .foregroundColor(.gray)
-                .padding(.bottom, 2)
-            
-            if #available(iOS 16.0, *) {
-                TextEditor(text: $code)
-                    .font(.system(.body, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .background(Color(red: 0.1, green: 0.1, blue: 0.1))
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                    .frame(minHeight: 60)
-            } else {
-                TextEditor(text: $code)
-                    .font(.system(.body, design: .monospaced))
-                    .background(Color(red: 0.1, green: 0.1, blue: 0.1))
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                    .frame(minHeight: 60)
-            }
+
+            TextEditor(text: $code)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .background(Color(red: 0.1, green: 0.1, blue: 0.1))
+                .foregroundColor(.white)
+                .cornerRadius(8)
+                .frame(minHeight: 80)
+
+            BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }
-        .padding(.vertical, 8)
     }
 }
 
-// --- 4. Calculation Block View ---
+// MARK: - Calculation Block
+
 struct CalculationBlockView: View {
     @Binding var equation: String
-    
+    @Binding var hashtags: [String]
+    var createdAt: Date
+
     private let numberFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.maximumFractionDigits = 2
         f.minimumFractionDigits = 0
         return f
     }()
-    
+
     var result: String {
         let cleanEq = equation.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleanEq.isEmpty { return "..." }
+        guard !cleanEq.isEmpty else { return "..." }
 
-        let allowedCharacters = CharacterSet(charactersIn: "0123456789.+-*/() ")
-        if cleanEq.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
+        // Allow digits, decimal, basic operators and parentheses
+        let allowed = CharacterSet(charactersIn: "0123456789.+-*/() ")
+        if cleanEq.rangeOfCharacter(from: allowed.inverted) != nil {
             return "?"
         }
-        
-        let unsafeEndings = ["+", "-", "*", "/", "("]
-        if unsafeEndings.contains(where: { cleanEq.hasSuffix($0) }) {
+
+        // Reject obviously bad endings like "+", "-", "*", "/"
+        if let last = cleanEq.last, "+-*/".contains(last) {
             return "..."
         }
-        
-        var openCount = 0
-        for char in cleanEq {
-            if char == "(" { openCount += 1 }
-            else if char == ")" {
-                openCount -= 1
-                if openCount < 0 { return "?" }
-            }
-        }
-        if openCount != 0 { return "..." }
 
+        // Try to evaluate with NSExpression; if it fails, show "?"
         let expression = NSExpression(format: cleanEq)
         if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
             return numberFormatter.string(from: value) ?? "..."
         } else {
-            return "..."
+            return "?"
         }
     }
-    
+
     var body: some View {
-        HStack {
-            TextField("e.g. 5 + 10", text: $equation)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 150)
-                .keyboardType(.numbersAndPunctuation)
-                .font(.system(.body, design: .monospaced))
-            
-            Text("=")
-                .foregroundColor(.secondary)
-            
-            Text(result)
-                .font(.headline.monospaced())
-                .foregroundColor(.blue)
-            
-            Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                TextField("e.g. 5 + 10", text: $equation)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numbersAndPunctuation)
+                    .font(.system(.body, design: .monospaced))
+
+                Text("=")
+                    .foregroundColor(.secondary)
+
+                Text(result)
+                    .font(.headline.monospaced())
+                    .foregroundColor(.blue)
+
+                Spacer()
+            }
+            .padding(.bottom, 8)
+
+            BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }
-        .padding(8)
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(8)
     }
 }
 
-// --- 5. Image Block View ---
+// MARK: - Image Block
+
 struct ImageBlockView: View {
     let imageData: Data?
-    
-    var body: some View {
-        if let data = imageData, let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .scaledToFit()
-                .cornerRadius(12)
-                .shadow(radius: 4)
-                .frame(maxHeight: 300)
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.2))
-                .frame(height: 200)
-                .overlay(Text("No Image").foregroundColor(.gray))
-                .cornerRadius(12)
-        }
-    }
-}
+    @Binding var hashtags: [String]
+    var createdAt: Date
 
-// --- CANVAS PREVIEW ---
-struct BlockViews_Previews: PreviewProvider {
-    static var previews: some View {
-        VStack(spacing: 20) {
-            // Note: We use HTML strings for preview now
-            TextBlockView(text: .constant("<b>Bold</b> and <i>Italic</i> text"))
-            HeadingBlockView(text: .constant("Experiment 1"))
-            CalculationBlockView(equation: .constant("12 * 5"))
-            CodeBlockView(code: .constant("print('Hello World')"))
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let data = imageData,
+               let uiImage = UIImage(data: data) {
+
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()                // fill the window
+                    .frame(maxWidth: .infinity)    // use full block width
+                    .frame(height: 220)            // constant block height
+                    .clipped()                     // crop overflow [web:30][web:48]
+                    .cornerRadius(8)
+
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 220)
+                    .overlay(
+                        Text("No Image").foregroundColor(.gray)
+                    )
+                    .cornerRadius(8)
+            }
+
+            BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }
-        .padding()
-        .previewLayout(.sizeThatFits)
     }
 }

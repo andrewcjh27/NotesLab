@@ -11,27 +11,71 @@ import Combine
 
 class NotesStore: ObservableObject {
     @Published var notes: [Note] = []
+
     private let saveURL: URL
 
     init() {
-        let documentDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        saveURL = documentDirectory.appendingPathComponent("notes_v2.json") // Changed name to avoid conflicts
+        let documentDirectory = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first!
+        saveURL = documentDirectory.appendingPathComponent("notes_v2.json")
         loadNotes()
     }
 
+    // Create a note starting with a specific block type (Text, Image, etc.)
+    func createNote(with type: BlockType) -> Note {
+        let initialBlock = NoteBlock(
+            id: UUID(),
+            type: type,
+            content: "",
+            hashtags: [],
+            createdAt: Date(),
+            imageData: nil,
+            isBold: false,
+            isItalic: false,
+            useSerif: false
+        )
+
+        let newNote = Note(
+            id: UUID(),
+            title: "",
+            icon: "📄",
+            date: Date(),
+            blocks: [initialBlock]
+        )
+
+        notes.insert(newNote, at: 0)
+        saveNotes()
+        return newNote
+    }
+
     func addNote(title: String) {
-        // Create a note with one default text block
-        let newNote = Note(title: title)
+        let newNote = Note(
+            id: UUID(),
+            title: title,
+            icon: "📄",
+            date: Date(),
+            blocks: []
+        )
+
         notes.insert(newNote, at: 0)
         saveNotes()
     }
 
+    // Used by List swipe actions
     func deleteNote(at offsets: IndexSet) {
         notes.remove(atOffsets: offsets)
         saveNotes()
     }
 
-    // CHANGED: We now accept the entire updated Note object
+    // Helper to delete a specific note object (useful for Grid context menu)
+    func deleteNote(_ note: Note) {
+        if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            notes.remove(at: index)
+            saveNotes()
+        }
+    }
+
     func updateNote(_ updatedNote: Note) {
         if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
             notes[index] = updatedNote
@@ -59,3 +103,4 @@ class NotesStore: ObservableObject {
         }
     }
 }
+
