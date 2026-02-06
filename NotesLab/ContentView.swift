@@ -16,23 +16,26 @@ struct ContentView: View {
         case alphabetical = "Alphabetical"
     }
 
-    // Creation
+    // Creation sheets
+    @State private var showingNewNoteTypeSheet = false
+    @State private var showingTextSheet = false
+    @State private var showingCodeSheet = false
+    @State private var showingMathSheet = false
+    @State private var showingImageSheet = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var isLoadingPhoto = false
 
-    // Text note alerts (new + edit)
-    @State private var showingTextAlert = false          // 1st alert: main text
-    @State private var textAlertValue = ""
-    @State private var editingTextNote: Note? = nil      // nil = new, non-nil = editing
+    // Editing
+    @State private var editingNote: Note? = nil
 
-    @State private var showingMetaAlert = false          // 2nd alert: description + hashtags
-    @State private var descriptionValue = ""
-    @State private var hashtagsValue = ""
-
-    // 2‑column grid
+    // 2-column grid
     let columns = [
         GridItem(.flexible(), spacing: 16),
         GridItem(.flexible(), spacing: 16)
     ]
+
+    // Cache for stripped HTML
+    @State private var previewCache: [UUID: String] = [:]
 
     // MARK: - Filtered notes
 
@@ -57,16 +60,13 @@ struct ContentView: View {
             searchMatch = true
         } else {
             let matchesTitle = note.title.localizedCaseInsensitiveContains(searchText)
-
             let allTags = note.blocks.flatMap { $0.hashtags }
             let matchesTag = allTags.contains {
                 $0.localizedCaseInsensitiveContains(searchText)
             }
-
             let blockContentMatch = note.blocks.contains {
                 $0.content.localizedCaseInsensitiveContains(searchText)
             }
-
             searchMatch = matchesTitle || matchesTag || blockContentMatch
         }
 
@@ -95,79 +95,22 @@ struct ContentView: View {
 
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(filteredNotes) { note in
-                            let isPureText = note.blocks.allSatisfy { $0.type == .text }
-
-                            if isPureText {
-                                // Text-only notes: edit via alerts, no navigation
-                                Button {
-                                    editingTextNote = note
-
-                                    if let firstText = note.blocks.first(where: { $0.type == .text }) {
-                                        textAlertValue = firstText.content
-                                    } else {
-                                        textAlertValue = ""
-                                    }
-
-                                    descriptionValue = note.title
-                                    let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
-                                    hashtagsValue = tags.joined(separator: " ")
-
-                                    showingTextAlert = true
+                            NavigationLink(value: note) {
+                                NoteCardView(note: note, previewCache: $previewCache)
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    store.deleteNote(note)
                                 } label: {
-                                    NoteCardView(note: note)
+                                    Label("Delete", systemImage: "trash")
                                 }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        store.deleteNote(note)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
 
-                                    Button {
-                                        // Edit main text via alerts
-                                        editingTextNote = note
-                                        if let firstText = note.blocks.first(where: { $0.type == .text }) {
-                                            textAlertValue = firstText.content
-                                        } else {
-                                            textAlertValue = ""
-                                        }
-                                        descriptionValue = note.title
-                                        let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
-                                        hashtagsValue = tags.joined(separator: " ")
-                                        showingTextAlert = true
-                                    } label: {
-                                        Label("Edit", systemImage: "pencil")
-                                    }
-                                }
-                            } else {
-                                // Other notes still use big editor
-                                NavigationLink(value: note) {
-                                    NoteCardView(note: note)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        store.deleteNote(note)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-
-                                    Button {
-                                        // Edit main text via alerts, even for non-text notes if desired
-                                        editingTextNote = note
-                                        if let firstText = note.blocks.first(where: { $0.type == .text }) {
-                                            textAlertValue = firstText.content
-                                        } else {
-                                            textAlertValue = ""
-                                        }
-                                        descriptionValue = note.title
-                                        let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
-                                        hashtagsValue = tags.joined(separator: " ")
-                                        showingTextAlert = true
-                                    } label: {
-                                        Label("Edit", systemImage: "pencil")
-                                    }
+                                Button {
+                                    editingNote = note
+                                    navigationPath.append(note)
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
                                 }
                             }
                         }
@@ -178,17 +121,110 @@ struct ContentView: View {
             .background(Color(UIColor.systemGroupedBackground))
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Canvas")
+                    Text("Nova")
                         .font(.system(.title, design: .serif))
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search my canvas")
+            .searchable(text: $searchText, prompt: "Search my novas")
             .navigationDestination(for: Note.self) { note in
                 NoteEditorView(note: note, store: store)
             }
+            // Centered popup for choosing note type
+            .overlay {
+                if showingNewNoteTypeSheet {
+                    ZStack {
+                        // Dim background
+                        Color.black.opacity(0.25)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                showingNewNoteTypeSheet = false
+                            }
+
+                        // Centered, narrow popup
+                        VStack(spacing: 20) {
+                            Text("Add Note")
+                                .font(.system(.title3, design: .serif).weight(.semibold))
+
+                            HStack(spacing: 16) {
+                                NoteTypeIconButton(
+                                    systemName: "text.alignleft",
+                                    label: "Text"
+                                ) {
+                                    showingNewNoteTypeSheet = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        editingNote = nil
+                                        showingTextSheet = true
+                                    }
+                                }
+
+                                NoteTypeIconButton(
+                                    systemName: "photo",
+                                    label: "Image"
+                                ) {
+                                    showingNewNoteTypeSheet = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        editingNote = nil
+                                        showingImageSheet = true
+                                    }
+                                }
+                            }
+
+                            HStack(spacing: 16) {
+                                NoteTypeIconButton(
+                                    systemName: "chevron.left.forwardslash.chevron.right",
+                                    label: "Code"
+                                ) {
+                                    showingNewNoteTypeSheet = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        editingNote = nil
+                                        showingCodeSheet = true
+                                    }
+                                }
+
+                                NoteTypeIconButton(
+                                    systemName: "function",
+                                    label: "Math"
+                                ) {
+                                    showingNewNoteTypeSheet = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        editingNote = nil
+                                        showingMathSheet = true
+                                    }
+                                }
+                            }
+
+                            HStack(spacing: 16) {
+                                Button("Cancel") {
+                                    showingNewNoteTypeSheet = false
+                                }
+                                .font(.system(.body, design: .serif))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(Color(.secondarySystemBackground))
+                                .cornerRadius(16)
+
+                                Button("Add") {
+                                    showingNewNoteTypeSheet = false
+                                }
+                                .font(.system(.body, design: .serif))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(Color(.secondarySystemBackground))
+                                .cornerRadius(16)
+                            }
+                        }
+                        .padding(20)
+                        .frame(maxWidth: 280)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(24)
+                        .shadow(radius: 20)
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut, value: showingNewNoteTypeSheet)
+                }
+            }
             .toolbar {
-                // Left toolbar
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
                         Picker("Sort By", selection: $sortOption) {
@@ -214,34 +250,14 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "line.3.horizontal")
                             .foregroundColor(.primary)
+                            .accessibilityLabel("Filter and Sort")
                     }
                 }
 
-                // Right toolbar
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        // New text note via alerts
-                        Button {
-                            editingTextNote = nil
-                            textAlertValue = ""
-                            descriptionValue = ""
-                            hashtagsValue = ""
-                            showingTextAlert = true
-                        } label: {
-                            Label("Text Note", systemImage: "text.alignleft")
-                        }
-
-                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                            Label("Image Note", systemImage: "photo")
-                        }
-
-                        Button { createAndNavigate(type: .code) } label: {
-                            Label("Code Note", systemImage: "chevron.left.forwardslash.chevron.right")
-                        }
-
-                        Button { createAndNavigate(type: .calculation) } label: {
-                            Label("Math Note", systemImage: "function")
-                        }
+                    Button {
+                        editingNote = nil
+                        showingNewNoteTypeSheet = true
                     } label: {
                         Image(systemName: "plus")
                             .font(.headline)
@@ -249,235 +265,253 @@ struct ContentView: View {
                             .frame(width: 32, height: 32)
                             .background(Color.orange)
                             .cornerRadius(8)
+                            .accessibilityLabel("Add Note")
                     }
                 }
             }
-            .onChange(of: selectedPhotoItem) { handlePhotoChange($0) }
-            // 1st alert: main text
-            .alert("Text Note", isPresented: $showingTextAlert) {
-                TextField("Text", text: $textAlertValue)
-
-                Button("Cancel", role: .cancel) {
-                    editingTextNote = nil
-                    textAlertValue = ""
-                    descriptionValue = ""
-                    hashtagsValue = ""
+            .overlay {
+                // Add Note popup (already there)
+                if showingNewNoteTypeSheet {
+                    /* your Add Note popup code */
                 }
 
-                Button("Next") {
-                    showingMetaAlert = true
+                // Editor popups
+                if showingTextSheet {
+                    CenteredPopupCard {
+                        NewTextNoteSheet(
+                            editingNote: editingNote,
+                            onSave: { note in
+                                if let existing = editingNote {
+                                    var updated = existing
+                                    updated.title = note.title
+                                    updated.blocks = note.blocks
+                                    store.updateNote(updated)
+                                } else {
+                                    store.notes.insert(note, at: 0)
+                                    store.updateNote(note)
+                                }
+                                editingNote = nil
+                                showingTextSheet = false
+                            }
+                        )
+                    } onBackgroundTap: {
+                        showingTextSheet = false
+                    }
+                } else if showingImageSheet {
+                    CenteredPopupCard {
+                        NewImageNoteSheet(
+                            editingNote: editingNote,
+                            onSave: { note in
+                                if let existing = editingNote {
+                                    var updated = existing
+                                    updated.title = note.title
+                                    updated.blocks = note.blocks
+                                    store.updateNote(updated)
+                                } else {
+                                    store.notes.insert(note, at: 0)
+                                    store.updateNote(note)
+                                }
+                                editingNote = nil
+                                showingImageSheet = false
+                            }
+                        )
+                    } onBackgroundTap: {
+                        showingImageSheet = false
+                    }
+                } else if showingCodeSheet {
+                    CenteredPopupCard {
+                        NewCodeNoteSheet(
+                            editingNote: editingNote,
+                            onSave: { note in
+                                if let existing = editingNote {
+                                    var updated = existing
+                                    updated.title = note.title
+                                    updated.blocks = note.blocks
+                                    store.updateNote(updated)
+                                } else {
+                                    store.notes.insert(note, at: 0)
+                                    store.updateNote(note)
+                                }
+                                editingNote = nil
+                                showingCodeSheet = false
+                            }
+                        )
+                    } onBackgroundTap: {
+                        showingCodeSheet = false
+                    }
+                } else if showingMathSheet {
+                    CenteredPopupCard {
+                        NewMathNoteSheet(
+                            editingNote: editingNote,
+                            onSave: { note in
+                                if let existing = editingNote {
+                                    var updated = existing
+                                    updated.title = note.title
+                                    updated.blocks = note.blocks
+                                    store.updateNote(updated)
+                                } else {
+                                    store.notes.insert(note, at: 0)
+                                    store.updateNote(note)
+                                }
+                                editingNote = nil
+                                showingMathSheet = false
+                            }
+                        )
+                    } onBackgroundTap: {
+                        showingMathSheet = false
+                    }
                 }
             }
-            // 2nd alert: description + hashtags, performs save
-            .alert("Details", isPresented: $showingMetaAlert) {
-                TextField("Description", text: $descriptionValue)
-                TextField("Hashtags (space separated)", text: $hashtagsValue)
-
-                Button("Cancel", role: .cancel) {
-                    editingTextNote = nil
-                    descriptionValue = ""
-                    hashtagsValue = ""
+            .alert("Save Error", isPresented: .constant(store.saveError != nil)) {
+                Button("OK") {
+                    store.saveError = nil
                 }
+            } message: {
+                if let error = store.saveError {
+                    Text(error)
+                }
+            }
+        }
+    }
 
-                Button(editingTextNote == nil ? "Add" : "Save") {
-                    let tags = hashtagsValue
-                        .split(whereSeparator: { $0.isWhitespace })
-                        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty }
+    // MARK: - Note card
 
-                    if var note = editingTextNote {
-                        // Editing existing note
-                        if let idx = note.blocks.firstIndex(where: { $0.type == .text }) {
-                            note.blocks[idx].content = textAlertValue
-                            note.blocks[idx].hashtags = tags
+    struct NoteCardView: View {
+        let note: Note
+        @Binding var previewCache: [UUID: String]
+
+        private var firstTextLikeBlock: NoteBlock? {
+            note.blocks.first(where: { $0.type == .text || $0.type == .heading || $0.type == .code })
+        }
+
+        private var firstMathBlock: NoteBlock? {
+            note.blocks.first(where: { $0.type == .calculation })
+        }
+
+        private var displayTitle: String {
+            let trimmedTitle = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTitle.isEmpty {
+                return trimmedTitle
+            }
+
+            if let textBlock = firstTextLikeBlock {
+                let plain = getCachedStrippedHTML(for: textBlock)
+                if !plain.isEmpty { return plain }
+            }
+
+            if let mathBlock = firstMathBlock {
+                return mathBlock.content
+            }
+
+            if let imgBlock = note.blocks.first(where: { $0.type == .image }) {
+                let desc = imgBlock.content
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .split(separator: "\n")
+                    .first
+                    .map(String.init) ?? ""
+                if !desc.isEmpty { return desc }
+            }
+
+            let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
+            if !tags.isEmpty {
+                return tags.map { "#\($0)" }.joined(separator: " ")
+            }
+
+            return "Untitled"
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                // Fixed size image or text preview container
+                GeometryReader { geometry in
+                    ZStack {
+                        if let firstImageBlock = note.blocks.first(where: { $0.type == .image }),
+                           let data = firstImageBlock.imageData,
+                           let uiImage = UIImage(data: data) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: geometry.size.width, height: 150)
+                                .clipped()
+                                .accessibilityLabel("Note image")
+                        } else if let codeBlock = note.blocks.first(where: { $0.type == .code }) {
+                            // Code preview with dark theme, centered text
+                            let bg = Color(hex: "1E1E1E")
+
+                            bg
+                                .frame(width: geometry.size.width, height: 150)
+
+                            Text(codeBlock.content.isEmpty ? "// Empty code block" : codeBlock.content)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(Color(hex: "D4D4D4"))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(8)
+                                .truncationMode(.tail)
+                                .padding(12)
+                                .frame(width: geometry.size.width, height: 150, alignment: .center)
+                        } else if let mathBlock = note.blocks.first(where: { $0.type == .calculation }) {
+                            // Math preview showing equation and result, centered and adaptive
+                            Color.white
+                                .frame(width: geometry.size.width, height: 150)
+
+                            VStack(spacing: 8) {
+                                Text(mathBlock.content.isEmpty ? "..." : mathBlock.content)
+                                    .font(.system(size: 16, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
+
+                                HStack(spacing: 6) {
+                                    Text("=")
+                                        .font(.system(size: 18, design: .serif))
+                                        .foregroundColor(.secondary)
+
+                                    Text(calculateResult(mathBlock.content))
+                                        .font(.system(size: 34, design: .serif).bold())
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.4)
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            .frame(width: geometry.size.width, height: 150, alignment: .center)
                         } else {
-                            let block = NoteBlock(
-                                id: UUID(),
-                                type: .text,
-                                content: textAlertValue,
-                                hashtags: tags,
-                                createdAt: Date(),
-                                imageData: nil,
-                                isBold: false,
-                                isItalic: false,
-                                useSerif: false
-                            )
-                            note.blocks.append(block)
+                            Color.white
+                                .frame(width: geometry.size.width, height: 150)
+
+                            Text(getPreviewText())
+                                .font(firstTextLikeBlock.map(previewFont(for:)) ?? .system(size: 20, design: .serif))
+                                .minimumScaleFactor(0.6)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(3)
+                                .truncationMode(.tail)
+                                .foregroundColor(.primary)
+                                .padding(12)
+                                .frame(width: geometry.size.width, height: 150)
                         }
-                        note.title = descriptionValue
-                        store.updateNote(note)
-                    } else {
-                        // Creating new text note
-                        let block = NoteBlock(
-                            id: UUID(),
-                            type: .text,
-                            content: textAlertValue,
-                            hashtags: tags,
-                            createdAt: Date(),
-                            imageData: nil,
-                            isBold: false,
-                            isItalic: false,
-                            useSerif: false
-                        )
-
-                        let note = Note(
-                            id: UUID(),
-                            title: descriptionValue,
-                            icon: "📄",
-                            date: Date(),
-                            blocks: [block]
-                        )
-
-                        store.notes.insert(note, at: 0)
-                        store.updateNote(note)
                     }
-
-                    editingTextNote = nil
-                    textAlertValue = ""
-                    descriptionValue = ""
-                    hashtagsValue = ""
-                }
-            }
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func createAndNavigate(type: BlockType) {
-        let note = store.createNote(with: type)
-        navigationPath.append(note)
-    }
-
-    private func handlePhotoChange(_ newItem: PhotosPickerItem?) {
-        guard let newItem else { return }
-        Task {
-            if let data = try? await newItem.loadTransferable(type: Data.self) {
-                createImageNoteAndNavigate(data: data)
-            }
-            selectedPhotoItem = nil
-        }
-    }
-
-    private func createImageNoteAndNavigate(data: Data) {
-        var note = store.createNote(with: .image)
-
-        if note.blocks.isEmpty {
-            let block = NoteBlock(
-                id: UUID(),
-                type: .image,
-                content: "",
-                hashtags: [],
-                createdAt: Date(),
-                imageData: data,
-                isBold: false,
-                isItalic: false,
-                useSerif: false
-            )
-            note.blocks.append(block)
-        } else {
-            note.blocks[0].imageData = data
-            note.blocks[0].content = ""
-        }
-
-        store.updateNote(note)
-        navigationPath.append(note)
-    }
-}
-
-// MARK: - Note card
-
-struct NoteCardView: View {
-    let note: Note
-
-    private var firstTextLikeBlock: NoteBlock? {
-        note.blocks.first(where: { $0.type == .text || $0.type == .heading || $0.type == .code })
-    }
-
-    private var displayTitle: String {
-        let trimmedTitle = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedTitle.isEmpty {
-            return trimmedTitle
-        }
-
-        if let textBlock = firstTextLikeBlock {
-            let plain = stripHTML(from: textBlock.content)
-            if !plain.isEmpty { return plain }
-        }
-
-        if let imgBlock = note.blocks.first(where: { $0.type == .image }) {
-            let desc = imgBlock.content
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .split(separator: "\n")
-                .first
-                .map(String.init) ?? ""
-            if !desc.isEmpty { return desc }
-        }
-
-        let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
-        if !tags.isEmpty {
-            return tags.map { "#\($0)" }.joined(separator: " ")
-        }
-
-        return "Untitled"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let firstImageBlock = note.blocks.first(where: { $0.type == .image }),
-               let data = firstImageBlock.imageData,
-               let uiImage = UIImage(data: data) {
-
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 150)
-                    .clipped()
-                    .contentShape(Rectangle())
-            } else {
-                ZStack {
-                    Color.white
-                    Text(getPreviewText())
-                        .font(firstTextLikeBlock.map(previewFont(for:)) ?? .system(size: 20, design: .serif))
-                        .minimumScaleFactor(0.6)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                        .truncationMode(.tail)
-                        .foregroundColor(.primary)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
                 .frame(height: 150)
-            }
+                .clipped()
 
-            if let imgBlock = note.blocks.first(where: { $0.type == .image }),
-               !imgBlock.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(imgBlock.content)
-                    .font(.footnote)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 6)
-            }
+                // Bottom info section
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(displayTitle)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayTitle)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-
-                HStack {
-                    Text(note.date.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2)
-                        .foregroundColor(.gray)
-
-                    Spacer()
-
-                    if !note.blocks.isEmpty {
-                        Image(systemName: "doc.text")
+                    HStack {
+                        Text(note.date.formatted(date: .omitted, time: .shortened))
                             .font(.caption2)
                             .foregroundColor(.gray)
+                        Spacer()
+                        if !note.blocks.isEmpty {
+                            Image(systemName: "doc.text")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                                .accessibilityHidden(true)
+                        }
                     }
 
                     let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
@@ -496,53 +530,151 @@ struct NoteCardView: View {
                             }
                             .frame(height: 20)
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Tags: \(tags.prefix(3).joined(separator: ", "))")
                     }
                 }
+                .padding(10)
             }
-            .padding(10)
+            .frame(maxWidth: .infinity)
+            .background(
+                note.blocks.contains { $0.type == .code }
+                    ? Color(hex: "1E1E1E")
+                    : Color.white
+            )
+            .cornerRadius(12)
+            .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
         }
-        .frame(maxWidth: .infinity)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
-    }
 
-    private func getPreviewText() -> String {
-        if let block = firstTextLikeBlock {
-            return stripHTML(from: block.content)
+        private func getPreviewText() -> String {
+            if let block = firstTextLikeBlock {
+                return getCachedStrippedHTML(for: block)
+            }
+            return "New Note"
         }
-        return "New Note"
-    }
 
-    private func stripHTML(from text: String) -> String {
-        var plain = text
-        plain = plain.replacingOccurrences(
-            of: "(?is)<style[\\s\\S]*?</style>",
-            with: "",
-            options: .regularExpression
-        )
-        plain = plain.replacingOccurrences(
-            of: "<[^>]+>",
-            with: "",
-            options: .regularExpression
-        )
-        plain = plain.replacingOccurrences(of: "&nbsp;", with: " ")
-        plain = plain.replacingOccurrences(of: "&amp;", with: "&")
-        return plain.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func previewFont(for block: NoteBlock) -> Font {
-        // Default serif for previews
-        var base: Font = .system(size: 20, design: .serif)
-
-        if block.isBold && block.isItalic {
-            base = base.weight(.bold).italic()
-        } else if block.isBold {
-            base = base.weight(.bold)
-        } else if block.isItalic {
-            base = base.italic()
+        private func getCachedStrippedHTML(for block: NoteBlock) -> String {
+            if let cached = previewCache[block.id] {
+                return cached
+            }
+            let stripped = stripHTML(from: block.content)
+            previewCache[block.id] = stripped
+            return stripped
         }
-        return base
+
+        private func stripHTML(from text: String) -> String {
+            var plain = text
+            plain = plain.replacingOccurrences(
+                of: "(?is)<style[\\s\\S]*?</style>",
+                with: "",
+                options: .regularExpression
+            )
+            plain = plain.replacingOccurrences(
+                of: "<[^>]+>",
+                with: "",
+                options: .regularExpression
+            )
+            plain = plain.replacingOccurrences(of: "&nbsp;", with: " ")
+            plain = plain.replacingOccurrences(of: "&amp;", with: "&")
+            return plain.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        private func previewFont(for block: NoteBlock) -> Font {
+            var base: Font = .system(size: 20, design: .serif)
+            if block.isBold && block.isItalic {
+                base = base.weight(.bold).italic()
+            } else if block.isBold {
+                base = base.weight(.bold)
+            } else if block.isItalic {
+                base = base.italic()
+            }
+            return base
+        }
+
+        private func calculateResult(_ equation: String) -> String {
+            let cleanEq = equation.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanEq.isEmpty else { return "..." }
+
+            let allowed = CharacterSet(charactersIn: "0123456789.+-*/() ")
+            if cleanEq.rangeOfCharacter(from: allowed.inverted) != nil {
+                return "?"
+            }
+
+            if let last = cleanEq.last, "+-*/.".contains(last) {
+                return "..."
+            }
+
+            let expression = NSExpression(format: cleanEq)
+            if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
+                let number = value.doubleValue
+                let formatter = NumberFormatter()
+                formatter.maximumFractionDigits = 4
+                formatter.minimumFractionDigits = 0
+                formatter.numberStyle = .decimal
+                guard let decimalString = formatter.string(from: NSNumber(value: number)) else {
+                    return "?"
+                }
+                if decimalString.count > 15 {
+                    return String(decimalString.prefix(15))
+                }
+                return decimalString
+            } else {
+                return "?"
+            }
+        }
     }
 }
 
+// Icon button used in the Add Note popup
+struct NoteTypeIconButton: View {
+    let systemName: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: systemName)
+                    .font(.system(size: 22))
+                Text(label)
+                    .font(.system(.caption, design: .serif))
+            }
+            .foregroundColor(.blue)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(18)
+        }
+    }
+}
+struct CenteredPopupCard<Content: View>: View {
+    let content: Content
+    let onBackgroundTap: () -> Void
+
+    init(@ViewBuilder content: () -> Content,
+         onBackgroundTap: @escaping () -> Void) {
+        self.content = content()
+        self.onBackgroundTap = onBackgroundTap
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    onBackgroundTap()
+                }
+
+            VStack {
+                content
+            }
+            .padding(20)
+            .frame(maxWidth: 360, maxHeight: 480) // similar size to Add Note popup
+            .background(Color(.systemBackground))
+            .cornerRadius(24)
+            .shadow(radius: 20)
+        }
+        .transition(.opacity)
+        .animation(.easeInOut, value: true)
+    }
+}

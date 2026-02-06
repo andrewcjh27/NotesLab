@@ -2,6 +2,9 @@
 //  NewNoteView.swift
 //  NotesLab
 //
+//  NewNoteView.swift
+//  NotesLab
+//
 //  Created by Andrew Choi on 1/26/26.
 //
 
@@ -26,7 +29,6 @@ struct NewNoteView: View {
             Spacer()
 
             Button("Create Note") {
-                // CHANGED: Calling the simplified addNote function
                 store.addNote(title: title)
                 dismiss()
             }

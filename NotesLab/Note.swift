@@ -1,4 +1,3 @@
-
 //
 //  Note.swift
 //  NotesLab
@@ -33,4 +32,3 @@ struct Note: Identifiable, Codable, Hashable {
     var date: Date
     var blocks: [NoteBlock]
 }
-

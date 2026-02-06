@@ -15,23 +15,14 @@ struct NoteEditorView: View {
 
     @FocusState private var isInputActive: Bool
 
-    // Sheet-based text editing for existing blocks
     @State private var editingBlockIndex: Int? = nil
     @State private var showingEditTextFlow = false
-    @State private var draftText = ""
-    @State private var draftHashtags: [String] = []
-    @State private var draftDescription = ""
-    @State private var draftIsBold = false
-    @State private var draftIsItalic = false
-    @State private var draftUseSerif = false
 
     init(note: Note, store: NotesStore) {
         _note = State(initialValue: note)
         self.store = store
         _previousIcon = State(initialValue: note.icon)
     }
-
-    // MARK: - Body
 
     var body: some View {
         ScrollView {
@@ -54,26 +45,26 @@ struct NoteEditorView: View {
         .onChange(of: note) { _ in
             store.updateNote(note)
         }
-        // Sheet for editing existing text blocks
         .sheet(isPresented: $showingEditTextFlow) {
-            if let index = editingBlockIndex {
+            if let index = editingBlockIndex, index < note.blocks.count {
+                let block = note.blocks[index]
                 NewTextNoteSheet(
-                    text: $draftText,
-                    hashtags: $draftHashtags,
-                    description: $draftDescription
-                ) { text, tags, description, isBold, isItalic, useSerif in
-                    note.blocks[index].content = text
-                    note.blocks[index].hashtags = tags
-                    note.blocks[index].isBold = isBold
-                    note.blocks[index].isItalic = isItalic
-                    note.blocks[index].useSerif = useSerif
-                    store.updateNote(note)
+                    editingNote: Note(
+                        id: note.id,
+                        title: note.title,
+                        icon: note.icon,
+                        date: note.date,
+                        blocks: [block]
+                    )
+                ) { updatedNote in
+                    if let updatedBlock = updatedNote.blocks.first {
+                        note.blocks[index] = updatedBlock
+                        store.updateNote(note)
+                    }
                 }
             }
         }
     }
-
-    // MARK: - Subviews
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -94,15 +85,14 @@ struct NoteEditorView: View {
                 .onChange(of: note.icon) { newValue in
                     guard !newValue.isEmpty else { return }
                     let lastChar = String(newValue.suffix(1))
-                    if lastChar.containsOnlyEmoji {
+                    if lastChar.containsValidEmoji {
                         note.icon = lastChar
                         previousIcon = lastChar
                     } else {
                         note.icon = previousIcon
                     }
                 }
-
-            // No title field anymore
+                .accessibilityLabel("Note icon")
         }
         .padding(.bottom)
     }
@@ -168,12 +158,14 @@ struct NoteEditorView: View {
                 } label: {
                     Image(systemName: "bold")
                 }
+                .accessibilityLabel("Toggle bold")
 
                 Button {
                     sendAction(#selector(RichTextView.toggleItalic))
                 } label: {
                     Image(systemName: "italic")
                 }
+                .accessibilityLabel("Toggle italic")
 
                 Menu {
                     Button("Standard") {
@@ -188,11 +180,10 @@ struct NoteEditorView: View {
                 } label: {
                     Image(systemName: "textformat")
                 }
+                .accessibilityLabel("Font style")
             }
         }
     }
-
-    // MARK: - Actions
 
     private func sendAction(_ selector: Selector) {
         UIApplication.shared.sendAction(selector, to: nil, from: nil, for: nil)
@@ -203,7 +194,6 @@ struct NoteEditorView: View {
         switch binding.wrappedValue.type {
         case .text:
             VStack(alignment: .leading, spacing: 6) {
-                // Show text but edit via sheet when tapped
                 TextEditor(text: binding.content)
                     .font(.body)
                     .frame(minHeight: 80)
@@ -214,13 +204,6 @@ struct NoteEditorView: View {
                     .onTapGesture {
                         if let index = note.blocks.firstIndex(where: { $0.id == binding.wrappedValue.id }) {
                             editingBlockIndex = index
-                            let b = note.blocks[index]
-                            draftText = b.content
-                            draftHashtags = b.hashtags
-                            draftDescription = ""
-                            draftIsBold = b.isBold
-                            draftIsItalic = b.isItalic
-                            draftUseSerif = b.useSerif
                             showingEditTextFlow = true
                         }
                     }
@@ -254,11 +237,34 @@ struct NoteEditorView: View {
 
         case .image:
             VStack(alignment: .leading, spacing: 8) {
-                ImageBlockView(
-                    imageData: binding.wrappedValue.imageData,
-                    hashtags: binding.hashtags,
-                    createdAt: binding.wrappedValue.createdAt
-                )
+                // Inline ImageBlockView to avoid scope issues
+                VStack(alignment: .leading, spacing: 6) {
+                    if let data = binding.wrappedValue.imageData,
+                       let uiImage = downsampleImage(data: data, to: CGSize(width: 500, height: 500)) {
+
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 220)
+                            .clipped()
+                            .cornerRadius(8)
+                            .accessibilityLabel("Block image")
+
+                    } else {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(height: 220)
+                            .overlay(
+                                Text("No Image").foregroundColor(.gray)
+                            )
+                            .cornerRadius(8)
+                            .accessibilityLabel("No image")
+                    }
+
+                    BlockFooterView(hashtags: binding.hashtags, createdAt: binding.wrappedValue.createdAt)
+                }
+                
                 TextField("Description (optional)", text: binding.content)
                     .font(.subheadline)
                     .textFieldStyle(.roundedBorder)
@@ -271,8 +277,6 @@ struct NoteEditorView: View {
             note.blocks.removeAll { $0.id == id }
         }
     }
-
-    // MARK: - Preview text + HTML helper
 
     private func previewText(for block: NoteBlock) -> String {
         switch block.type {
@@ -294,14 +298,40 @@ struct NoteEditorView: View {
         let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "No text" : trimmed
     }
+    
+    private func downsampleImage(data: Data, to targetSize: CGSize) -> UIImage? {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: max(targetSize.width, targetSize.height),
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+
+        return UIImage(cgImage: cgImage)
+    }
 }
 
 // MARK: - Helpers
 
 extension String {
-    var containsOnlyEmoji: Bool {
+    var containsValidEmoji: Bool {
         guard !isEmpty else { return false }
-        return unicodeScalars.allSatisfy { $0.properties.isEmoji }
+        
+        // Get the first grapheme cluster (what users see as one character)
+        let firstGrapheme = String(self.prefix(1))
+        
+        // Check if it contains emoji
+        return firstGrapheme.unicodeScalars.contains { scalar in
+            scalar.properties.isEmoji &&
+            scalar.value > 0x238C // Exclude things like # and *
+        }
     }
 }
 
@@ -313,6 +343,10 @@ struct DropViewDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         draggedItem = nil
         return true
+    }
+    
+    func dropExited(info: DropInfo) {
+        draggedItem = nil
     }
 
     func dropEntered(info: DropInfo) {

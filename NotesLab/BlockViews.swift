@@ -37,6 +37,7 @@ struct BlockFooterView: View {
                                     hashtags.remove(at: idx)
                                 }
                             }
+                            .accessibilityLabel("Tag \(tag), tap to remove")
                     }
 
                     Button {
@@ -46,6 +47,7 @@ struct BlockFooterView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .accessibilityLabel("Add tag")
                 }
             }
         }
@@ -54,8 +56,9 @@ struct BlockFooterView: View {
             HStack {
                 TextField("New tag", text: $newTag)
                     .onSubmit(addTag)
-
+                    .textInputAutocapitalization(.never)
                 Button("Add", action: addTag)
+                    .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding()
             .presentationCompactAdaptation(.popover)
@@ -64,7 +67,7 @@ struct BlockFooterView: View {
 
     private func addTag() {
         let tag = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tag.isEmpty else { return }
+        guard !tag.isEmpty, tag.count <= 50 else { return }
         hashtags.append(tag)
         newTag = ""
         showTagInput = false
@@ -84,6 +87,7 @@ struct HeadingBlockView: View {
                 .font(.title2.bold())
                 .foregroundColor(.primary)
                 .padding(.vertical, 4)
+                .accessibilityLabel("Heading")
 
             BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }
@@ -104,12 +108,13 @@ struct CodeBlockView: View {
                 .foregroundColor(.gray)
 
             TextEditor(text: $code)
-                .font(.system(.body, design: .monospaced))
+                .font(.system(size: 14, design: .monospaced))
                 .scrollContentBackground(.hidden)
-                .background(Color(red: 0.1, green: 0.1, blue: 0.1))
-                .foregroundColor(.white)
+                .background(Color(hex: "1E1E1E"))
+                .foregroundColor(Color(hex: "D4D4D4"))
                 .cornerRadius(8)
                 .frame(minHeight: 80)
+                .accessibilityLabel("Code editor")
 
             BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }
@@ -123,32 +128,33 @@ struct CalculationBlockView: View {
     @Binding var hashtags: [String]
     var createdAt: Date
 
-    private let numberFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.maximumFractionDigits = 2
-        f.minimumFractionDigits = 0
-        return f
-    }()
-
     var result: String {
         let cleanEq = equation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanEq.isEmpty else { return "..." }
 
-        // Allow digits, decimal, basic operators and parentheses
         let allowed = CharacterSet(charactersIn: "0123456789.+-*/() ")
         if cleanEq.rangeOfCharacter(from: allowed.inverted) != nil {
             return "?"
         }
 
-        // Reject obviously bad endings like "+", "-", "*", "/"
-        if let last = cleanEq.last, "+-*/".contains(last) {
+        if let last = cleanEq.last, "+-*/.".contains(last) {
             return "..."
         }
 
-        // Try to evaluate with NSExpression; if it fails, show "?"
         let expression = NSExpression(format: cleanEq)
         if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
-            return numberFormatter.string(from: value) ?? "..."
+            let number = value.doubleValue
+            let formatter = NumberFormatter()
+            formatter.maximumFractionDigits = 4
+            formatter.minimumFractionDigits = 0
+            formatter.numberStyle = .decimal
+            guard let decimalString = formatter.string(from: NSNumber(value: number)) else {
+                return "?"
+            }
+            if decimalString.count > 15 {
+                return String(decimalString.prefix(15))
+            }
+            return decimalString
         } else {
             return "?"
         }
@@ -157,56 +163,24 @@ struct CalculationBlockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                TextField("e.g. 5 + 10", text: $equation)
+                TextField("e.g. 5.5 + 10.2", text: $equation)
                     .textFieldStyle(.roundedBorder)
-                    .keyboardType(.numbersAndPunctuation)
+                    .keyboardType(.decimalPad)
                     .font(.system(.body, design: .monospaced))
+                    .accessibilityLabel("Equation input")
 
                 Text("=")
                     .foregroundColor(.secondary)
 
                 Text(result)
-                    .font(.headline.monospaced())
+                    .font(.system(size: 28, design: .serif).weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.4)
                     .foregroundColor(.blue)
 
                 Spacer()
             }
             .padding(.bottom, 8)
-
-            BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
-        }
-    }
-}
-
-// MARK: - Image Block
-
-struct ImageBlockView: View {
-    let imageData: Data?
-    @Binding var hashtags: [String]
-    var createdAt: Date
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let data = imageData,
-               let uiImage = UIImage(data: data) {
-
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()                // fill the window
-                    .frame(maxWidth: .infinity)    // use full block width
-                    .frame(height: 220)            // constant block height
-                    .clipped()                     // crop overflow [web:30][web:48]
-                    .cornerRadius(8)
-
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 220)
-                    .overlay(
-                        Text("No Image").foregroundColor(.gray)
-                    )
-                    .cornerRadius(8)
-            }
 
             BlockFooterView(hashtags: $hashtags, createdAt: createdAt)
         }

@@ -7,65 +7,54 @@ struct RichTextEditor: UIViewRepresentable {
     func makeUIView(context: Context) -> RichTextView {
         let textView = RichTextView()
         textView.isEditable = true
-        textView.isScrollEnabled = false        // Let SwiftUI drive height
+        textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         textView.delegate = context.coordinator
 
-        // Ensure wrapping
         textView.textContainer.lineFragmentPadding = 0
         textView.textContainerInset = .zero
         textView.font = UIFont.preferredFont(forTextStyle: .body)
 
         context.coordinator.textView = textView
-
-        // Initial HTML load
-        if Thread.isMainThread {
-            context.coordinator.setHTML(text, in: textView)
-        } else {
-            DispatchQueue.main.async {
-                context.coordinator.setHTML(text, in: textView)
-            }
-        }
+        context.coordinator.setHTML(text, in: textView)
 
         return textView
     }
 
     func updateUIView(_ uiView: RichTextView, context: Context) {
-        // Only push binding → UI when user is NOT typing
+        // Only update if user is not actively editing
         guard !uiView.isFirstResponder else { return }
-
-        let apply = {
-            context.coordinator.setHTML(text, in: uiView)
-        }
-
-        if Thread.isMainThread {
-            apply()
-        } else {
-            DispatchQueue.main.async(execute: apply)
-        }
+        context.coordinator.setHTML(text, in: uiView)
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+        Coordinator(text: $text)
     }
 
     class Coordinator: NSObject, UITextViewDelegate {
-        var parent: RichTextEditor
+        @Binding var text: String
         weak var textView: UITextView?
 
-        init(_ parent: RichTextEditor) {
-            self.parent = parent
+        init(text: Binding<String>) {
+            _text = text
         }
 
         func textViewDidChange(_ textView: UITextView) {
             // Convert attributed text → HTML for storage
             let range = NSRange(location: 0, length: textView.attributedText.length)
-            if let data = try? textView.attributedText.data(
-                from: range,
-                documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
-            ),
-               let html = String(data: data, encoding: .utf8) {
-                parent.text = html
+            
+            do {
+                let data = try textView.attributedText.data(
+                    from: range,
+                    documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
+                )
+                if let html = String(data: data, encoding: .utf8) {
+                    text = html
+                }
+            } catch {
+                print("Error converting to HTML: \(error)")
+                // Fallback to plain text
+                text = textView.text
             }
         }
 
@@ -77,7 +66,7 @@ struct RichTextEditor: UIViewRepresentable {
             }
 
             guard let data = html.data(using: .utf8) else {
-                textView.text = html        // Fallback to plain text
+                textView.text = html
                 return
             }
 
@@ -93,7 +82,7 @@ struct RichTextEditor: UIViewRepresentable {
 
                 let mutable = NSMutableAttributedString(attributedString: attributed)
 
-                // Normalize fonts and colors so they work with dynamic type + dark mode
+                // Normalize fonts and colors for dynamic type + dark mode
                 let fullRange = NSRange(location: 0, length: mutable.length)
 
                 mutable.enumerateAttribute(.font, in: fullRange) { value, range, _ in
@@ -115,13 +104,13 @@ struct RichTextEditor: UIViewRepresentable {
                 textView.attributedText = mutable
             } catch {
                 print("Error parsing HTML for editor: \(error)")
-                textView.text = html        // Fallback if HTML is malformed
+                textView.text = html
             }
         }
     }
 }
 
-// Custom UITextView with basic rich‑text toggles
+// Custom UITextView with basic rich-text toggles
 class RichTextView: UITextView {
 
     @objc func toggleBold() { toggleTrait(.traitBold) }
@@ -177,7 +166,6 @@ class RichTextView: UITextView {
         delegate?.textViewDidChange?(self)
     }
 
-    // Let SwiftUI compute height based on content
     override var intrinsicContentSize: CGSize {
         let size = sizeThatFits(
             CGSize(width: bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width,

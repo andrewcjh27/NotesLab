@@ -1,95 +1,90 @@
-//
-//  NewTextNoteSheet.swift
-//  NotesLab
-//
-//  Created by Andrew Choi on 2/4/26.
-//
-
 import SwiftUI
 
-struct NewTextNoteSheet: View {
+struct NewMathNoteSheet: View {
     let editingNote: Note?
     var onSave: (Note) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var text: String = ""
+
+    @State private var equation: String = ""
     @State private var hashtags: [String] = []
     @State private var newTag = ""
     @State private var showingTagInput = false
 
-    @State private var isBold = false
-    @State private var isItalic = false
-    @State private var useSerif = false
-    
-    private let maxTextLength = 10000
-
     init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
         self.editingNote = editingNote
         self.onSave = onSave
-        
+
         if let note = editingNote,
-           let firstBlock = note.blocks.first(where: { $0.type == .text }) {
-            _text = State(initialValue: firstBlock.content)
+           let firstBlock = note.blocks.first(where: { $0.type == .calculation }) {
+            _equation = State(initialValue: firstBlock.content)
             _hashtags = State(initialValue: firstBlock.hashtags)
-            _isBold = State(initialValue: firstBlock.isBold)
-            _isItalic = State(initialValue: firstBlock.isItalic)
-            _useSerif = State(initialValue: firstBlock.useSerif)
         }
     }
 
+    // MARK: - Result
+
+    var result: String {
+        let cleanEq = equation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanEq.isEmpty else { return "..." }
+
+        // Allow digits, decimal point, basic operators, parentheses, and spaces
+        let allowed = CharacterSet(charactersIn: "0123456789.+-*/() ")
+        if cleanEq.rangeOfCharacter(from: allowed.inverted) != nil {
+            return "?"
+        }
+
+        // Check for invalid endings
+        if let last = cleanEq.last, "+-*/.".contains(last) {
+            return "..."
+        }
+
+        let expression = NSExpression(format: cleanEq)
+        if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
+            let number = value.doubleValue
+            let formatter = NumberFormatter()
+            formatter.maximumFractionDigits = 4
+            formatter.minimumFractionDigits = 0
+            formatter.numberStyle = .decimal
+            return formatter.string(from: NSNumber(value: number)) ?? "?"
+        } else {
+            return "?"
+        }
+    }
+
+    // MARK: - Body
+
     var body: some View {
         VStack(spacing: 16) {
-            // Header
-            Text(editingNote == nil ? "Create Text Note" : "Edit Text Note")
+            Text(editingNote == nil ? "Create Math Note" : "Edit Math Note")
                 .font(.headline)
                 .padding(.top, 8)
 
-            // Formatting buttons
-            HStack(spacing: 16) {
-                Button { isBold.toggle() } label: {
-                    Text("B")
-                        .fontWeight(.bold)
-                        .foregroundColor(isBold ? .primary : .secondary)
-                        .frame(width: 32, height: 32)
-                        .background(isBold ? Color.blue.opacity(0.2) : Color.clear)
-                        .cornerRadius(6)
+            // Equation + result
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Enter equation (e.g. 5.5 + 10.2)", text: $equation)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                    .font(.system(.body, design: .monospaced))
+
+                HStack {
+                    Text("=")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+
+                    Text(result)
+                        .font(.system(size: 24, design: .serif).weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.4)
+                        .foregroundColor(.blue)
+
+                    Spacer()
                 }
-
-                Button { isItalic.toggle() } label: {
-                    Text("I")
-                        .italic()
-                        .foregroundColor(isItalic ? .primary : .secondary)
-                        .frame(width: 32, height: 32)
-                        .background(isItalic ? Color.blue.opacity(0.2) : Color.clear)
-                        .cornerRadius(6)
-                }
-
-                Menu {
-                    Button("Standard") { useSerif = false }
-                    Button("Serif") { useSerif = true }
-                } label: {
-                    Text("Aa")
-                        .foregroundColor(.primary)
-                        .frame(width: 32, height: 32)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(6)
-                }
-
-                Spacer()
-            }
-
-            // Text editor
-            TextEditor(text: $text)
-                .font(currentFont)
-                .frame(minHeight: 140, maxHeight: 180)
                 .padding(8)
+                .frame(maxWidth: .infinity)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(8)
-                .onChange(of: text) { newValue in
-                    if newValue.count > maxTextLength {
-                        text = String(newValue.prefix(maxTextLength))
-                    }
-                }
+            }
 
             // Tags
             VStack(alignment: .leading, spacing: 8) {
@@ -140,37 +135,19 @@ struct NewTextNoteSheet: View {
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.borderedProminent)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(equation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.bottom, 8)
         }
         .padding()
         .alert("Add Tag", isPresented: $showingTagInput) {
             TextField("Tag name", text: $newTag)
-            Button("Cancel", role: .cancel) {
-                newTag = ""
-            }
-            Button("Add") {
-                addTag()
-            }
+            Button("Cancel", role: .cancel) { newTag = "" }
+            Button("Add") { addTag() }
         }
     }
 
-
-    private var currentFont: Font {
-        var base: Font = useSerif
-            ? .system(size: 16, design: .serif)
-            : .system(size: 16, design: .default)
-
-        if isBold && isItalic {
-            base = base.weight(.bold).italic()
-        } else if isBold {
-            base = base.weight(.bold)
-        } else if isItalic {
-            base = base.italic()
-        }
-        return base
-    }
+    // MARK: - Helpers
 
     private func addTag() {
         let trimmed = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -178,28 +155,28 @@ struct NewTextNoteSheet: View {
         hashtags.append(trimmed)
         newTag = ""
     }
-    
+
     private func saveNote() {
         let block = NoteBlock(
             id: editingNote?.blocks.first?.id ?? UUID(),
-            type: .text,
-            content: text,
+            type: .calculation,
+            content: equation,
             hashtags: hashtags,
             createdAt: editingNote?.blocks.first?.createdAt ?? Date(),
             imageData: nil,
-            isBold: isBold,
-            isItalic: isItalic,
-            useSerif: useSerif
+            isBold: false,
+            isItalic: false,
+            useSerif: false
         )
-        
+
         let note = Note(
             id: editingNote?.id ?? UUID(),
             title: editingNote?.title ?? "",
-            icon: editingNote?.icon ?? "📄",
+            icon: editingNote?.icon ?? "🔢",
             date: Date(),
             blocks: [block]
         )
-        
+
         onSave(note)
         dismiss()
     }
