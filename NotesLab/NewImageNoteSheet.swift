@@ -4,8 +4,7 @@ import PhotosUI
 struct NewImageNoteSheet: View {
     let editingNote: Note?
     var onSave: (Note) -> Void
-
-    @Environment(\.dismiss) private var dismiss
+    var onCancel: () -> Void
 
     @State private var image: UIImage? = nil
     @State private var caption: String = ""
@@ -16,9 +15,10 @@ struct NewImageNoteSheet: View {
     @State private var pickerItem: PhotosPickerItem? = nil
     @State private var isLoading = false
 
-    init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
+    init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void, onCancel: @escaping () -> Void) {
         self.editingNote = editingNote
         self.onSave = onSave
+        self.onCancel = onCancel
 
         if let note = editingNote,
            let firstBlock = note.blocks.first(where: { $0.type == .image }) {
@@ -138,7 +138,7 @@ struct NewImageNoteSheet: View {
             // Buttons
             HStack(spacing: 12) {
                 Button("Cancel") {
-                    dismiss()
+                    onCancel()
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.bordered)
@@ -150,7 +150,6 @@ struct NewImageNoteSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(image == nil && editingNote == nil)
             }
-            .padding(.bottom, 8)
         }
         .padding()
         .alert("Add Tag", isPresented: $showingTagInput) {
@@ -193,10 +192,10 @@ struct NewImageNoteSheet: View {
             title: editingNote?.title ?? "",
             icon: editingNote?.icon ?? "🖼",
             date: Date(),
-            blocks: [block]
+            blocks: [block],
+            cardColorHex: editingNote?.cardColorHex ?? Note.randomCardColor()
         )
 
         onSave(note)
-        dismiss()
     }
 }

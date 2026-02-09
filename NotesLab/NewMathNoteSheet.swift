@@ -3,17 +3,17 @@ import SwiftUI
 struct NewMathNoteSheet: View {
     let editingNote: Note?
     var onSave: (Note) -> Void
-
-    @Environment(\.dismiss) private var dismiss
+    var onCancel: () -> Void
 
     @State private var equation: String = ""
     @State private var hashtags: [String] = []
     @State private var newTag = ""
     @State private var showingTagInput = false
 
-    init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
+    init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void, onCancel: @escaping () -> Void) {
         self.editingNote = editingNote
         self.onSave = onSave
+        self.onCancel = onCancel
 
         if let note = editingNote,
            let firstBlock = note.blocks.first(where: { $0.type == .calculation }) {
@@ -125,7 +125,7 @@ struct NewMathNoteSheet: View {
             // Buttons
             HStack(spacing: 12) {
                 Button("Cancel") {
-                    dismiss()
+                    onCancel()
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.bordered)
@@ -137,7 +137,6 @@ struct NewMathNoteSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(equation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.bottom, 8)
         }
         .padding()
         .alert("Add Tag", isPresented: $showingTagInput) {
@@ -174,10 +173,10 @@ struct NewMathNoteSheet: View {
             title: editingNote?.title ?? "",
             icon: editingNote?.icon ?? "🔢",
             date: Date(),
-            blocks: [block]
+            blocks: [block],
+            cardColorHex: editingNote?.cardColorHex ?? Note.randomCardColor()
         )
 
         onSave(note)
-        dismiss()
     }
 }

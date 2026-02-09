@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var store = NotesStore()
@@ -14,6 +15,7 @@ struct ContentView: View {
     enum SortOption: String, CaseIterable {
         case recent = "Recently Added"
         case alphabetical = "Alphabetical"
+        case custom = "Custom Order"
     }
 
     // Creation sheets
@@ -27,6 +29,9 @@ struct ContentView: View {
 
     // Editing
     @State private var editingNote: Note? = nil
+
+    // Drag-and-drop reordering
+    @State private var draggedNote: Note? = nil
 
     // 2-column grid
     let columns = [
@@ -44,13 +49,14 @@ struct ContentView: View {
             doesNoteMatch(note)
         }
 
-        return filtered.sorted {
-            switch sortOption {
-            case .recent:
-                return $0.date > $1.date
-            case .alphabetical:
-                return $0.title < $1.title
-            }
+        switch sortOption {
+        case .recent:
+            return filtered.sorted { $0.date > $1.date }
+        case .alphabetical:
+            return filtered.sorted { $0.title < $1.title }
+        case .custom:
+            // Preserve the natural order from store.notes (filter already maintains it)
+            return filtered
         }
     }
 
@@ -93,12 +99,25 @@ struct ContentView: View {
                             .padding(.horizontal)
                     }
 
-                    LazyVGrid(columns: columns, spacing: 16) {
+                    LazyVGrid(columns: columns, alignment: .top, spacing: 16) {
                         ForEach(filteredNotes) { note in
                             NavigationLink(value: note) {
                                 NoteCardView(note: note, previewCache: $previewCache)
                             }
                             .buttonStyle(.plain)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 12))
+                            .opacity(draggedNote?.id == note.id ? 0.4 : 1.0)
+                            .onDrag {
+                                draggedNote = note
+                                sortOption = .custom
+                                return NSItemProvider(object: note.id.uuidString as NSString)
+                            }
+                            .onDrop(of: [UTType.text], delegate: NoteCardDropDelegate(
+                                targetNote: note,
+                                draggedNote: $draggedNote,
+                                store: store
+                            ))
                             .contextMenu {
                                 Button(role: .destructive) {
                                     store.deleteNote(note)
@@ -116,6 +135,15 @@ struct ContentView: View {
                         }
                     }
                     .padding()
+                    .onDrop(of: [UTType.text], delegate: GridBackgroundDropDelegate(draggedNote: $draggedNote))
+                    .onChange(of: store.notes) { _ in
+                        // Failsafe: clear drag state whenever the notes array settles
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if draggedNote != nil {
+                                withAnimation { draggedNote = nil }
+                            }
+                        }
+                    }
                 }
             }
             .background(Color(UIColor.systemGroupedBackground))
@@ -135,18 +163,19 @@ struct ContentView: View {
                 if showingNewNoteTypeSheet {
                     ZStack {
                         // Dim background
-                        Color.black.opacity(0.25)
+                        Color.black.opacity(0.3)
                             .ignoresSafeArea()
                             .onTapGesture {
                                 showingNewNoteTypeSheet = false
                             }
 
-                        // Centered, narrow popup
-                        VStack(spacing: 20) {
-                            Text("Add Note")
-                                .font(.system(.title3, design: .serif).weight(.semibold))
+                        // Compact, rounded popup
+                        VStack(spacing: 14) {
+                            Text("New Note")
+                                .font(.system(.headline, design: .serif))
 
-                            HStack(spacing: 16) {
+                            // 2x2 grid of type buttons
+                            HStack(spacing: 12) {
                                 NoteTypeIconButton(
                                     systemName: "text.alignleft",
                                     label: "Text"
@@ -170,7 +199,7 @@ struct ContentView: View {
                                 }
                             }
 
-                            HStack(spacing: 16) {
+                            HStack(spacing: 12) {
                                 NoteTypeIconButton(
                                     systemName: "chevron.left.forwardslash.chevron.right",
                                     label: "Code"
@@ -194,34 +223,26 @@ struct ContentView: View {
                                 }
                             }
 
-                            HStack(spacing: 16) {
-                                Button("Cancel") {
-                                    showingNewNoteTypeSheet = false
-                                }
-                                .font(.system(.body, design: .serif))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(16)
-
-                                Button("Add") {
-                                    showingNewNoteTypeSheet = false
-                                }
-                                .font(.system(.body, design: .serif))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(16)
+                            Button {
+                                showingNewNoteTypeSheet = false
+                            } label: {
+                                Text("Cancel")
+                                    .font(.system(.subheadline, design: .serif))
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
                             }
                         }
-                        .padding(20)
-                        .frame(maxWidth: 280)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 18)
+                        .padding(.bottom, 8)
+                        .frame(maxWidth: 240)
                         .background(Color(.systemBackground))
-                        .cornerRadius(24)
-                        .shadow(radius: 20)
+                        .cornerRadius(28)
+                        .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 8)
                     }
                     .transition(.opacity)
-                    .animation(.easeInOut, value: showingNewNoteTypeSheet)
+                    .animation(.easeInOut(duration: 0.2), value: showingNewNoteTypeSheet)
                 }
             }
             .toolbar {
@@ -270,11 +291,6 @@ struct ContentView: View {
                 }
             }
             .overlay {
-                // Add Note popup (already there)
-                if showingNewNoteTypeSheet {
-                    /* your Add Note popup code */
-                }
-
                 // Editor popups
                 if showingTextSheet {
                     CenteredPopupCard {
@@ -292,9 +308,14 @@ struct ContentView: View {
                                 }
                                 editingNote = nil
                                 showingTextSheet = false
+                            },
+                            onCancel: {
+                                editingNote = nil
+                                showingTextSheet = false
                             }
                         )
                     } onBackgroundTap: {
+                        editingNote = nil
                         showingTextSheet = false
                     }
                 } else if showingImageSheet {
@@ -313,9 +334,14 @@ struct ContentView: View {
                                 }
                                 editingNote = nil
                                 showingImageSheet = false
+                            },
+                            onCancel: {
+                                editingNote = nil
+                                showingImageSheet = false
                             }
                         )
                     } onBackgroundTap: {
+                        editingNote = nil
                         showingImageSheet = false
                     }
                 } else if showingCodeSheet {
@@ -334,9 +360,14 @@ struct ContentView: View {
                                 }
                                 editingNote = nil
                                 showingCodeSheet = false
+                            },
+                            onCancel: {
+                                editingNote = nil
+                                showingCodeSheet = false
                             }
                         )
                     } onBackgroundTap: {
+                        editingNote = nil
                         showingCodeSheet = false
                     }
                 } else if showingMathSheet {
@@ -355,9 +386,14 @@ struct ContentView: View {
                                 }
                                 editingNote = nil
                                 showingMathSheet = false
+                            },
+                            onCancel: {
+                                editingNote = nil
+                                showingMathSheet = false
                             }
                         )
                     } onBackgroundTap: {
+                        editingNote = nil
                         showingMathSheet = false
                     }
                 }
@@ -420,78 +456,189 @@ struct ContentView: View {
             return "Untitled"
         }
 
+        /// Check if image is predominantly light by sampling average brightness
+        private var imageIsLight: Bool {
+            guard let firstImageBlock = note.blocks.first(where: { $0.type == .image }),
+                  let data = firstImageBlock.imageData,
+                  let uiImage = UIImage(data: data) else { return true }
+            return Self.isImageLight(uiImage)
+        }
+
+        /// True if the note has an image block with valid image data
+        private var hasImage: Bool {
+            guard let firstImageBlock = note.blocks.first(where: { $0.type == .image }),
+                  let data = firstImageBlock.imageData,
+                  let _ = UIImage(data: data) else { return false }
+            return true
+        }
+
+        private var adaptivePrimaryColor: Color {
+            imageIsLight ? .black : .white
+        }
+
+        private var adaptiveSecondaryColor: Color {
+            imageIsLight ? Color.black.opacity(0.6) : Color.white.opacity(0.7)
+        }
+
+        private var adaptiveTagBackground: Color {
+            imageIsLight ? Color.indigo.opacity(0.15) : Color.white.opacity(0.2)
+        }
+
+        private var adaptiveTagForeground: Color {
+            imageIsLight ? .indigo : .white
+        }
+
+        /// Card background color from the note's stored hex, falling back to white
+        private var cardBackground: Color {
+            if let hex = note.cardColorHex {
+                return Color(hex: hex)
+            }
+            return Color.white
+        }
+
+        private var gradientColors: [Color] {
+            imageIsLight
+                ? [Color.white.opacity(0), Color.white.opacity(0.85)]
+                : [Color.black.opacity(0), Color.black.opacity(0.7)]
+        }
+
         var body: some View {
-            VStack(alignment: .leading, spacing: 0) {
-                // Fixed size image or text preview container
-                GeometryReader { geometry in
-                    ZStack {
-                        if let firstImageBlock = note.blocks.first(where: { $0.type == .image }),
-                           let data = firstImageBlock.imageData,
-                           let uiImage = UIImage(data: data) {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: geometry.size.width, height: 150)
-                                .clipped()
-                                .accessibilityLabel("Note image")
-                        } else if let codeBlock = note.blocks.first(where: { $0.type == .code }) {
-                            // Code preview with dark theme, centered text
-                            let bg = Color(hex: "1E1E1E")
+            if hasImage {
+                // Full-bleed image card
+                imageCardBody
+            } else {
+                // Standard card (code / math / text)
+                standardCardBody
+            }
+        }
 
-                            bg
-                                .frame(width: geometry.size.width, height: 150)
+        // MARK: - Image card (full-bleed)
 
-                            Text(codeBlock.content.isEmpty ? "// Empty code block" : codeBlock.content)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(Color(hex: "D4D4D4"))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(8)
-                                .truncationMode(.tail)
-                                .padding(12)
-                                .frame(width: geometry.size.width, height: 150, alignment: .center)
-                        } else if let mathBlock = note.blocks.first(where: { $0.type == .calculation }) {
-                            // Math preview showing equation and result, centered and adaptive
-                            Color.white
-                                .frame(width: geometry.size.width, height: 150)
+        private var imageCardBody: some View {
+            let firstImageBlock = note.blocks.first(where: { $0.type == .image })!
+            let uiImage = UIImage(data: firstImageBlock.imageData!)!
 
-                            VStack(spacing: 8) {
-                                Text(mathBlock.content.isEmpty ? "..." : mathBlock.content)
-                                    .font(.system(size: 16, design: .monospaced))
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.6)
+            return GeometryReader { geometry in
+                ZStack(alignment: .bottomLeading) {
+                    // Full-bleed image
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .accessibilityLabel("Note image")
 
-                                HStack(spacing: 6) {
-                                    Text("=")
-                                        .font(.system(size: 18, design: .serif))
-                                        .foregroundColor(.secondary)
+                    // Gradient overlay for text readability
+                    LinearGradient(
+                        colors: gradientColors,
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: geometry.size.height * 0.55)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
 
-                                    Text(calculateResult(mathBlock.content))
-                                        .font(.system(size: 34, design: .serif).bold())
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.4)
-                                        .foregroundColor(.blue)
-                                }
+                    // Overlaid info
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayTitle)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(adaptivePrimaryColor)
+                            .lineLimit(1)
+
+                        HStack {
+                            Text(note.date.formatted(date: .omitted, time: .shortened))
+                                .font(.caption2)
+                                .foregroundColor(adaptiveSecondaryColor)
+                            Spacer()
+                            if !note.blocks.isEmpty {
+                                Image(systemName: "photo")
+                                    .font(.caption2)
+                                    .foregroundColor(adaptiveSecondaryColor)
+                                    .accessibilityHidden(true)
                             }
-                            .frame(width: geometry.size.width, height: 150, alignment: .center)
-                        } else {
-                            Color.white
-                                .frame(width: geometry.size.width, height: 150)
+                        }
 
-                            Text(getPreviewText())
-                                .font(firstTextLikeBlock.map(previewFont(for:)) ?? .system(size: 20, design: .serif))
-                                .minimumScaleFactor(0.6)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(3)
-                                .truncationMode(.tail)
-                                .foregroundColor(.primary)
-                                .padding(12)
-                                .frame(width: geometry.size.width, height: 150)
+                        let tags = Array(Set(note.blocks.flatMap { $0.hashtags })).sorted()
+                        if !tags.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 4) {
+                                    ForEach(tags.prefix(3), id: \.self) { tag in
+                                        Text("#\(tag)")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 2)
+                                            .background(adaptiveTagBackground)
+                                            .foregroundColor(adaptiveTagForeground)
+                                            .cornerRadius(4)
+                                    }
+                                }
+                                .frame(height: 20)
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Tags: \(tags.prefix(3).joined(separator: ", "))")
                         }
                     }
+                    .padding(10)
                 }
-                .frame(height: 150)
-                .clipped()
+            }
+            .frame(height: 220)
+            .frame(maxWidth: .infinity)
+            .cornerRadius(12)
+            .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
+        }
+
+        // MARK: - Standard card (code, math, text)
+
+        private var standardCardBody: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                // Content preview — height adapts to content
+                Group {
+                    if let codeBlock = note.blocks.first(where: { $0.type == .code }) {
+                        Text(codeBlock.content.isEmpty ? "// Empty code block" : codeBlock.content)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(Color(hex: "D4D4D4"))
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(12)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    } else if let mathBlock = note.blocks.first(where: { $0.type == .calculation }) {
+                        VStack(spacing: 8) {
+                            Text(mathBlock.content.isEmpty ? "..." : mathBlock.content)
+                                .font(.system(size: 16, design: .monospaced))
+                                .foregroundColor(.primary)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.6)
+
+                            HStack(spacing: 6) {
+                                Text("=")
+                                    .font(.system(size: 18, design: .serif))
+                                    .foregroundColor(.secondary)
+
+                                Text(calculateResult(mathBlock.content))
+                                    .font(.system(size: 34, design: .serif).bold())
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.4)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                    } else {
+                        Text(getPreviewText())
+                            .font(firstTextLikeBlock.map(previewFont(for:)) ?? .system(size: 20, design: .serif))
+                            .minimumScaleFactor(0.6)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(8)
+                            .truncationMode(.tail)
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    }
+                }
+                .frame(minHeight: 80)
+
+                Spacer(minLength: 0)
 
                 // Bottom info section
                 VStack(alignment: .leading, spacing: 4) {
@@ -540,7 +687,7 @@ struct ContentView: View {
             .background(
                 note.blocks.contains { $0.type == .code }
                     ? Color(hex: "1E1E1E")
-                    : Color.white
+                    : cardBackground
             )
             .cornerRadius(12)
             .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
@@ -622,6 +769,54 @@ struct ContentView: View {
                 return "?"
             }
         }
+
+        /// Sample the bottom third of the image to determine if it's light or dark
+        static func isImageLight(_ image: UIImage) -> Bool {
+            guard let cgImage = image.cgImage else { return true }
+
+            let width = cgImage.width
+            let height = cgImage.height
+
+            // Sample the bottom third (where the text overlay sits)
+            let sampleHeight = max(height / 3, 1)
+            let sampleY = height - sampleHeight
+
+            guard let cropped = cgImage.cropping(to: CGRect(x: 0, y: sampleY, width: width, height: sampleHeight)) else {
+                return true
+            }
+
+            // Down-sample to a tiny size for fast average
+            let sampleSize = 4
+            let bytesPerPixel = 4
+            let bytesPerRow = sampleSize * bytesPerPixel
+            var pixelData = [UInt8](repeating: 0, count: sampleSize * sampleSize * bytesPerPixel)
+
+            guard let context = CGContext(
+                data: &pixelData,
+                width: sampleSize,
+                height: sampleSize,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return true }
+
+            context.draw(cropped, in: CGRect(x: 0, y: 0, width: sampleSize, height: sampleSize))
+
+            var totalLuminance: Double = 0
+            let pixelCount = sampleSize * sampleSize
+            for i in 0..<pixelCount {
+                let offset = i * bytesPerPixel
+                let r = Double(pixelData[offset]) / 255.0
+                let g = Double(pixelData[offset + 1]) / 255.0
+                let b = Double(pixelData[offset + 2]) / 255.0
+                // Relative luminance (perceived brightness)
+                totalLuminance += 0.299 * r + 0.587 * g + 0.114 * b
+            }
+
+            let avgLuminance = totalLuminance / Double(pixelCount)
+            return avgLuminance > 0.55
+        }
     }
 }
 
@@ -633,17 +828,17 @@ struct NoteTypeIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 5) {
                 Image(systemName: systemName)
-                    .font(.system(size: 22))
+                    .font(.system(size: 20))
                 Text(label)
-                    .font(.system(.caption, design: .serif))
+                    .font(.system(.caption2, design: .serif))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(.primary.opacity(0.7))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
             .background(Color(.secondarySystemBackground))
-            .cornerRadius(18)
+            .cornerRadius(14)
         }
     }
 }
@@ -659,22 +854,69 @@ struct CenteredPopupCard<Content: View>: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.25)
+            Color.black.opacity(0.3)
                 .ignoresSafeArea()
                 .onTapGesture {
                     onBackgroundTap()
                 }
 
-            VStack {
+            VStack(spacing: 0) {
                 content
             }
-            .padding(20)
-            .frame(maxWidth: 360, maxHeight: 480) // similar size to Add Note popup
+            .frame(maxWidth: 340)
             .background(Color(.systemBackground))
-            .cornerRadius(24)
-            .shadow(radius: 20)
+            .cornerRadius(28)
+            .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 8)
+            .padding(.horizontal, 24)
         }
         .transition(.opacity)
-        .animation(.easeInOut, value: true)
+        .animation(.easeInOut(duration: 0.2), value: true)
+    }
+}
+
+// MARK: - Drop Delegates for grid card reordering
+
+struct NoteCardDropDelegate: DropDelegate {
+    let targetNote: Note
+    @Binding var draggedNote: Note?
+    let store: NotesStore
+
+    func performDrop(info: DropInfo) -> Bool {
+        withAnimation {
+            draggedNote = nil
+        }
+        return true
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = draggedNote, dragged.id != targetNote.id else { return }
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            store.swapNotes(fromID: dragged.id, toID: targetNote.id)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        // No action needed on exit
+    }
+}
+
+/// Catches drops that land outside any card to clear the drag state
+struct GridBackgroundDropDelegate: DropDelegate {
+    @Binding var draggedNote: Note?
+
+    func performDrop(info: DropInfo) -> Bool {
+        withAnimation {
+            draggedNote = nil
+        }
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
     }
 }

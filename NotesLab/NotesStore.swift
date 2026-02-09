@@ -45,7 +45,8 @@ class NotesStore: ObservableObject {
             title: "",
             icon: "📄",
             date: Date(),
-            blocks: [initialBlock]
+            blocks: [initialBlock],
+            cardColorHex: Note.randomCardColor()
         )
 
         notes.insert(newNote, at: 0)
@@ -59,7 +60,8 @@ class NotesStore: ObservableObject {
             title: title,
             icon: "📄",
             date: Date(),
-            blocks: []
+            blocks: [],
+            cardColorHex: Note.randomCardColor()
         )
 
         notes.insert(newNote, at: 0)
@@ -86,6 +88,16 @@ class NotesStore: ObservableObject {
             notes[index].date = Date()
             debouncedSave()
         }
+    }
+
+    /// Swap two notes by their IDs (used for drag-and-drop reordering on the grid)
+    func swapNotes(fromID: UUID, toID: UUID) {
+        guard let fromIndex = notes.firstIndex(where: { $0.id == fromID }),
+              let toIndex = notes.firstIndex(where: { $0.id == toID }),
+              fromIndex != toIndex else { return }
+
+        notes.swapAt(fromIndex, toIndex)
+        debouncedSave()
     }
 
     private func debouncedSave() {

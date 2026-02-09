@@ -10,8 +10,8 @@ import SwiftUI
 struct NewTextNoteSheet: View {
     let editingNote: Note?
     var onSave: (Note) -> Void
+    var onCancel: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var text: String = ""
     @State private var hashtags: [String] = []
     @State private var newTag = ""
@@ -20,13 +20,14 @@ struct NewTextNoteSheet: View {
     @State private var isBold = false
     @State private var isItalic = false
     @State private var useSerif = false
-    
+
     private let maxTextLength = 10000
 
-    init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
+    init(editingNote: Note? = nil, onSave: @escaping (Note) -> Void, onCancel: @escaping () -> Void) {
         self.editingNote = editingNote
         self.onSave = onSave
-        
+        self.onCancel = onCancel
+
         if let note = editingNote,
            let firstBlock = note.blocks.first(where: { $0.type == .text }) {
             _text = State(initialValue: firstBlock.content)
@@ -130,7 +131,7 @@ struct NewTextNoteSheet: View {
             // Buttons
             HStack(spacing: 12) {
                 Button("Cancel") {
-                    dismiss()
+                    onCancel()
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.bordered)
@@ -142,7 +143,6 @@ struct NewTextNoteSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.bottom, 8)
         }
         .padding()
         .alert("Add Tag", isPresented: $showingTagInput) {
@@ -197,10 +197,10 @@ struct NewTextNoteSheet: View {
             title: editingNote?.title ?? "",
             icon: editingNote?.icon ?? "📄",
             date: Date(),
-            blocks: [block]
+            blocks: [block],
+            cardColorHex: editingNote?.cardColorHex ?? Note.randomCardColor()
         )
         
         onSave(note)
-        dismiss()
     }
 }

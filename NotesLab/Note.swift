@@ -31,4 +31,13 @@ struct Note: Identifiable, Codable, Hashable {
     var icon: String
     var date: Date
     var blocks: [NoteBlock]
+    var cardColorHex: String?
+
+    /// The two card background colors: white and warm beige
+    static let cardColors = ["FFFFFF", "E8E0D4"]
+
+    /// Pick a random card color from the palette
+    static func randomCardColor() -> String {
+        cardColors.randomElement() ?? "FFFFFF"
+    }
 }

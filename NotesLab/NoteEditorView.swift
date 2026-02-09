@@ -55,13 +55,17 @@ struct NoteEditorView: View {
                         icon: note.icon,
                         date: note.date,
                         blocks: [block]
-                    )
-                ) { updatedNote in
-                    if let updatedBlock = updatedNote.blocks.first {
-                        note.blocks[index] = updatedBlock
-                        store.updateNote(note)
+                    ),
+                    onSave: { updatedNote in
+                        if let updatedBlock = updatedNote.blocks.first {
+                            note.blocks[index] = updatedBlock
+                            store.updateNote(note)
+                        }
+                    },
+                    onCancel: {
+                        showingEditTextFlow = false
                     }
-                }
+                )
             }
         }
     }
