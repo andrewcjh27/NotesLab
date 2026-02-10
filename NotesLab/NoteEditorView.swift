@@ -61,6 +61,7 @@ struct NoteEditorView: View {
                             note.blocks[index] = updatedBlock
                             store.updateNote(note)
                         }
+                        showingEditTextFlow = false
                     },
                     onCancel: {
                         showingEditTextFlow = false
